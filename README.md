@@ -488,11 +488,12 @@ marketplace, no hook JSON, and no build step:
 ### Layout
 
 ```
-.opencode/plugin/cognicode.ts          engine: tools, guard, context injection
-.opencode/skills/cognicode-learn/      learning mode + 3 referenced guides
-.opencode/skills/cognicode-reset/      back up notes and restart onboarding
-scripts/install.sh                     install into a project or globally
-tests/cognicode.test.mjs               guard and tool tests, no model calls
+index.html                               project homepage (GitHub Pages)
+.opencode/plugin/cognicode.ts            engine: tools, guard, context injection
+.opencode/skills/cognicode-learn/        learning mode + 3 referenced guides
+.opencode/skills/cognicode-reset/        back up notes and restart onboarding
+scripts/install.sh                       install into a project or globally
+tests/cognicode.test.mjs                 guard and tool tests, no model calls
 ```
 
 ---
