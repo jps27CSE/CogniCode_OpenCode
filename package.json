@@ -1,0 +1,13 @@
+{
+  "name": "cognicode-opencode",
+  "private": true,
+  "type": "module",
+  "description": "Enforced learning-first development plugin for opencode",
+  "license": "MIT",
+  "scripts": {
+    "test": "node --experimental-strip-types --test tests/*.test.mjs"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "^1.14.39"
+  }
+}
