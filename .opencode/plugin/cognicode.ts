@@ -251,9 +251,11 @@ function withinScope(root: string, files: string[], target: string): boolean {
   })
 }
 
-function stateReport(snap: Snapshot, extra: Record<string, unknown> = {}) {
+function stateReport(snap: Snapshot, extra: Record<string, unknown> = {}, observed?: Set<string>) {
   const notes: Record<string, boolean> = {}
   for (const name of NOTE_FILES) notes[name] = snap.dir ? existsSync(join(snap.dir, name)) : false
+  const seen = observed ? [...observed].toSorted() : []
+  const unclassified = seen.filter((name) => !WRITE_TOOLS.has(name) && !READ_ONLY_TOOLS.has(name) && name !== "bash")
   return {
     state_directory: snap.dir,
     expected_state_directory: nextProjectDir(snap),
@@ -266,6 +268,15 @@ function stateReport(snap: Snapshot, extra: Record<string, unknown> = {}) {
     pending_decision: snap.store.decision,
     approval: snap.store.approval,
     notes,
+    guard: {
+      write_tools: [...WRITE_TOOLS],
+      read_only_tools: [...READ_ONLY_TOOLS],
+      observed_tools: seen,
+      unclassified_tools: unclassified,
+      note: unclassified.length
+        ? "The guard does not recognise these tool IDs, so it cannot classify them as read-only or as writes. Report them to the learner instead of assuming they are safe."
+        : "Every observed tool ID is classified. Shell commands are still judged by a deny-list heuristic, not a sandbox.",
+    },
     problem: snap.problem,
     ...extra,
   }
@@ -348,10 +359,10 @@ function makeDecision(input: {
 
 const READ_ONLY_COMMANDS = new Set([
   "ls", "pwd", "cd", "cat", "head", "tail", "wc", "file", "stat", "find", "fd", "tree", "du", "df",
-  "echo", "printf", "date", "whoami", "hostname", "uname", "which", "type", "command", "env",
-  "printenv", "realpath", "readlink", "basename", "dirname", "jq", "diff", "cmp", "nl", "sort",
+  "echo", "printf", "date", "whoami", "hostname", "uname", "which", "type", "printenv", "realpath",
+  "readlink", "basename", "dirname", "jq", "diff", "cmp", "nl", "sort",
   "uniq", "cut", "tr", "md5sum", "sha256sum", "less", "more", "man", "rg", "ripgrep", "grep",
-  "egrep", "sed", "awk", "sqlite3", "docker", "gh", "git", "bun", "node", "python", "python3",
+  "egrep", "sed", "sqlite3", "docker", "gh", "git", "bun", "node", "python", "python3",
 ])
 
 const READ_ONLY_GIT = new Set([
@@ -373,7 +384,11 @@ const SAFE_VERSION_ONLY = /^(bun|node|deno|npm|pnpm|yarn|python3?|ruby|go|java|m
 
 const DANGEROUS_FLAGS = /(?:^|\s)(-{1,2}(delete|exec|execdir|ok|okdir|in-place|interactive|output)|-i\b|--in-place\b)/i
 
+const SHORT_OUTPUT_FLAG = /(^|\s)-o(\s|=|$)/
+
 const REDIRECT = /(^|[^0-9&>])(>{1,2})|&>/
+
+const SED_SIDE_EFFECT = /(?:^|[;{}|/'"])\s*[we](?:\s|$)/
 
 const DESTRUCTIVE = new Set([
   "tee", "dd", "rm", "rmdir", "mv", "cp", "ln", "mkdir", "touch", "chmod", "chown", "install",
@@ -401,7 +416,10 @@ function isReadOnlyCommand(command: string): boolean {
     if (!READ_ONLY_COMMANDS.has(name)) return false
     if (INTERPRETERS.includes(name)) return false
     if (name === "sed" && /(^|\s)-i\S*/.test(segment)) return false
+    if (name === "sed" && SED_SIDE_EFFECT.test(segment)) return false
     if (name === "find" && /(^|\s)-(delete|exec|execdir|ok|okdir)\b/.test(segment)) return false
+    if (name === "find" && /(^|\s)-f(print|printf|ls)\b/.test(segment)) return false
+    if ((name === "sort" || name === "git") && SHORT_OUTPUT_FLAG.test(segment)) return false
     if (name === "sqlite3" && !/(\.schema|\.tables|\.dump|\.mode|select |pragma )/i.test(segment)) return false
     if (name === "docker" && !/^docker\s+(ps|images|logs|inspect|version|info|container ls|compose ps)\b/i.test(segment)) return false
     if (name === "gh" && !/^gh\s+(pr|issue|repo|run|workflow|search|api)\s+(list|view|status|checks|diff|logs|get)\b/i.test(segment)) return false
@@ -421,6 +439,10 @@ function isReadOnlyCommand(command: string): boolean {
 }
 
 const WRITE_TOOLS = new Set(["write", "edit", "patch", "multiedit", "notebookedit", "apply_patch", "str_replace"])
+const READ_ONLY_TOOLS = new Set([
+  "read", "glob", "grep", "list", "question", "task", "skill", "todowrite", "webfetch", "websearch",
+  "lsp", "invalid",
+])
 const PATH_KEYS = ["filePath", "file_path", "path", "file", "notebookPath", "notebook_path"]
 
 function targetPaths(args: Record<string, unknown>): string[] {
@@ -463,6 +485,7 @@ const CogniCodePlugin: Plugin = async ({ client, worktree, directory }) => {
   }
 
   const parents = new Map<string, string>()
+  const observedTools = new Set<string>()
   const bypassFor = (sessionID?: string) => {
     let id = sessionID
     const seen = new Set<string>()
@@ -481,18 +504,22 @@ const CogniCodePlugin: Plugin = async ({ client, worktree, directory }) => {
       if (info?.id && info.parentID) parents.set(info.id, info.parentID)
     },
 
+    "tool.definition": async (input) => {
+      if (input.toolID) observedTools.add(input.toolID)
+    },
+
     tool: {
       cognicode_state: tool({
         description:
           "Report CogniCode learning state for this project: notes directory, whether learning mode is engaged, " +
           "onboarding status, preferences, any pending decision or approved implementation scope, which note files exist, " +
-          "and any problem that must be reported instead of worked around. Call this first in every CogniCode session " +
-          "before reading notes or proposing anything.",
+          "which tool IDs the guard can classify, and any problem that must be reported instead of worked around. " +
+          "Call this first in every CogniCode session before reading notes or proposing anything.",
         args: {},
         async execute(_args, ctx) {
           ctx.metadata({ title: "CogniCode: learning state" })
           const snap = snapshot(ctx.worktree || ctx.directory || projectDir)
-          return JSON.stringify(stateReport(snap), null, 2)
+          return JSON.stringify(stateReport(snap, {}, observedTools), null, 2)
         },
       }),
 
@@ -500,7 +527,8 @@ const CogniCodePlugin: Plugin = async ({ client, worktree, directory }) => {
         description:
           "Engage learning-first mode for this project: creates the notes directory and records onboarding answers and " +
           "preferences. Idempotent — call it again with resume=true to re-engage an existing profile without changing " +
-          "preferences. Does not write profile.md or project-map.md; create those from state-templates.md afterwards.",
+          "preferences, without clearing an open decision, and without dropping an approved scope or unpausing a paused " +
+          "profile. Does not write profile.md or project-map.md; create those from state-templates.md afterwards.",
         args: {
           situation: tool.schema.enum(["new", "existing", "known", "unspecified"]).optional(),
           experience: tool.schema.enum(["beginner", "intermediate", "advanced", "unspecified"]).optional(),
@@ -515,14 +543,14 @@ const CogniCodePlugin: Plugin = async ({ client, worktree, directory }) => {
         async execute(args, ctx) {
           ctx.metadata({ title: "CogniCode: engage learning mode" })
           const snap = snapshot(ctx.worktree || ctx.directory || projectDir)
-          if (snap.problem) return JSON.stringify(stateReport(snap, { engaged_error: snap.problem }), null, 2)
+          if (snap.problem) return JSON.stringify(stateReport(snap, { engaged_error: snap.problem }, observedTools), null, 2)
           const dir = nextProjectDir(snap)
           const store: Store = {
             ...snap.store,
             engaged: true,
-            mode: "active",
-            decision: null,
-            approval: null,
+            mode: snap.store.engaged ? snap.store.mode : "active",
+            decision: snap.store.engaged ? snap.store.decision : null,
+            approval: snap.store.engaged ? snap.store.approval : null,
           }
           if (args.onboarding) store.onboarding = args.onboarding
           if (!args.resume) {
@@ -565,7 +593,7 @@ const CogniCodePlugin: Plugin = async ({ client, worktree, directory }) => {
                 : null,
               next_step:
                 "Create profile.md, project-map.md, and progress.md in the notes directory from state-templates.md, then continue the learner's task.",
-            }),
+            }, observedTools),
             null,
             2,
           )
@@ -584,9 +612,9 @@ const CogniCodePlugin: Plugin = async ({ client, worktree, directory }) => {
         async execute(args, ctx) {
           ctx.metadata({ title: "CogniCode: mode" })
           const snap = snapshot(ctx.worktree || ctx.directory || projectDir)
-          if (snap.problem) return JSON.stringify(stateReport(snap, { error: snap.problem }), null, 2)
+          if (snap.problem) return JSON.stringify(stateReport(snap, { error: snap.problem }, observedTools), null, 2)
           if (!snap.store.engaged) return JSON.stringify({ error: "Learning mode is not engaged for this project. Run cognicode_engage first." })
-          if (args.mode === snap.store.mode) return JSON.stringify(stateReport(snap, { note: `Learning mode was already ${args.mode}.` }), null, 2)
+          if (args.mode === snap.store.mode) return JSON.stringify(stateReport(snap, { note: `Learning mode was already ${args.mode}.` }, observedTools), null, 2)
           const store: Store = { ...snap.store, mode: args.mode, approval: args.mode === "paused" ? null : snap.store.approval }
           writeStore(snap, store)
           if (args.mode === "active" && !snap.store.decision)
@@ -597,7 +625,7 @@ const CogniCodePlugin: Plugin = async ({ client, worktree, directory }) => {
               outcome: "resumed",
               note: args.reason ?? "No reason given",
             })
-          return JSON.stringify(stateReport(snap), null, 2)
+          return JSON.stringify(stateReport(snap, {}, observedTools), null, 2)
         },
       }),
 
@@ -869,7 +897,8 @@ const CogniCodePlugin: Plugin = async ({ client, worktree, directory }) => {
 
       if (WRITE_TOOLS.has(input.tool)) {
         if (!snap.store.engaged || snap.store.mode !== "active") return
-        if (snap.dir && writeTargets.some((target) => toAbsolute(snap.root, target).startsWith(toAbsolute(snap.root, snap.dir) + sep))) return
+        const notesRoot = snap.dir ? toAbsolute(snap.root, snap.dir) : null
+        if (notesRoot && writeTargets.some((target) => toAbsolute(snap.root, target).startsWith(notesRoot + sep))) return
         if (blocking) throw new Error(blocking)
         const approval = snap.store.approval
         if (!approval) throw new Error(guardBlock(snap)!)

@@ -25,8 +25,9 @@ if [ "$global" -eq 1 ]; then
   target="$HOME/.config/opencode"
 fi
 
-target="$(cd "$target" 2>/dev/null && pwd)" || {
-  echo "install: no such directory: ${2:-}" >&2
+requested="$target"
+target="$(cd "$requested" 2>/dev/null && pwd)" || {
+  echo "install: no such directory: ${requested}" >&2
   exit 1
 }
 
@@ -55,6 +56,11 @@ done
 cat <<'NOTE'
 
 Done. Restart opencode, then run  /cognicode-learn  in your project.
+Type it even if it is not in the autocomplete list; /skills also lists it.
+
+To keep the skills slash-only on opencode 1.18.x, add to opencode.json:
+
+  "permission": { "skill": { "*": "allow", "cognicode-*": "deny" } }
 
 Notes and machine state live in .cognicode/ inside each project. Add it to that
 project's .gitignore — CogniCode suggests it but never edits .gitignore itself.

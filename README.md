@@ -138,6 +138,10 @@ isn't in the scope you approved.
 Six months later, when someone asks "why is search an endpoint and not a query
 param?", the answer is on disk — with your reasoning attached, not just the code.
 
+> Both transcripts are illustrations written by hand. The checkpoint blocks are
+> rendered verbatim by the plugin, so those lines are exact; the surrounding
+> conversation is what a well-behaved run looks like, not a captured session.
+
 ---
 
 ## How it works
@@ -163,6 +167,11 @@ Markdown files in your project.
 - Nothing else at runtime. No Python, no plugin marketplace, no build step.
 - **Node 22.6+** only if you want to run the test suite.
 
+The guard matches opencode's own tool IDs (`write`, `edit`, `bash`). If a future
+opencode renames or adds tools, run `cognicode_state` and read
+`guard.unclassified_tools` — it lists every tool the guard could not classify, so
+a silent gap shows up instead of disappearing.
+
 ---
 
 ## Install
@@ -170,7 +179,7 @@ Markdown files in your project.
 ### Into one project
 
 ```sh
-git clone <this-repo> cognicode_opencode
+git clone https://github.com/jps27CSE/CogniCode_OpenCode.git cognicode_opencode
 cd cognicode_opencode
 scripts/install.sh /path/to/your/project
 ```
@@ -200,8 +209,31 @@ startup, so a running session keeps using the old config.
 
 > On first launch opencode notices the plugin imports `@opencode-ai/plugin` and
 > generates `.opencode/package.json` itself, pinning the SDK to your opencode
-> version and installing it into `.opencode/node_modules/`. That needs network
-> access once. Both paths are gitignored.
+> version and installing it into `.opencode/node_modules/`. That install runs in
+> the background and needs network access once; if it fails, opencode only logs a
+> warning and the plugin silently does not load — see
+> [Troubleshooting](#troubleshooting). Both paths are gitignored.
+
+### Keep the skills slash-only (recommended)
+
+opencode 1.18.x ignores the `metadata["opencode/autoinvoke"]` key in a
+`SKILL.md`, so both skills are advertised to the model and it may load one on its
+own. To keep them slash-invoked only, add this to the project's `opencode.json`
+(or your global one):
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "permission": {
+    "skill": { "*": "allow", "cognicode-*": "deny" }
+  }
+}
+```
+
+`deny` hides a skill from the model. Typing `/cognicode-learn` still works,
+because that path runs the skill's contents directly rather than through the
+skill tool. Remove the block if you would rather the model may open the skill by
+name.
 
 Verify the install at any time:
 
@@ -215,7 +247,9 @@ opencode debug agent build    # should show the seven cognicode_* tools
 ## Quick start
 
 1. Start opencode in the project you want to work on.
-2. Run `/cognicode-learn`.
+2. Run `/cognicode-learn`. Type it even if it is not in the autocomplete list —
+   on opencode 1.18.x skills are not offered as top-level slash commands, so
+   `/skills` (the browse menu) is where you find them by name.
 3. Answer the setup questions — one at a time, with a picker. **Use defaults**
    skips the preference questions. For an existing repository the model inspects
    the code and drafts a project map first; a new project starts empty.
@@ -231,8 +265,9 @@ tells you to, but never edits `.gitignore` without saying so.
 
 **At the start of each session**, run `/cognicode-learn`. It resumes from your
 notes in seconds — no questions if onboarding is already complete — and loads the
-behavior guide. If the session has been compacted or seems to have lost track,
-run it again.
+behavior guide. Re-engaging never drops an open checkpoint or an approved scope,
+so running it twice is harmless. If the session has been compacted or seems to
+have lost track, run it again.
 
 **Then just ask for work** in plain English. There are no commands to learn.
 
@@ -303,8 +338,8 @@ While a decision is unresolved:
 | --- | --- |
 | `read`, `glob`, `grep`, `list` | `write`, `edit`, `patch`, `multiedit`, `notebookedit` |
 | `question`, `task`, `skill`, `todowrite` | mutating shell commands |
-| writes inside `.cognicode/` (your notes) | redirects, `sed -i`, `find -delete`, `xargs rm` |
-| read-only shell: `ls`, `cat`, `rg`, `sed -n`, `git status/log/diff/show/branch -a`, `node --version` | `npm`/`bun test`, `rm`, `mkdir`, `curl`, `git commit/push/checkout`, `gh pr create`, `node -e` |
+| writes inside `.cognicode/` (your notes) | redirects, `sed -i`, `sed 'w file'`, `find -delete`/`-fprint`, `xargs rm`, `sort -o` |
+| read-only shell: `ls`, `cat`, `rg`, `sed -n`, `git status/log/diff/show/branch -a`, `node --version` | `npm`/`bun test`, `rm`, `mkdir`, `curl`, `git commit/push/checkout`, `gh pr create`, `node -e`, `env`/`command` wrappers, `awk` |
 
 After you approve an implementation checkpoint:
 
@@ -337,8 +372,21 @@ Two escape hatches, both requiring you to say so explicitly:
 - **Pause** — "pause learning" stops enforcement and context injection while
   keeping every note, preference, and open decision intact.
 
-The guard is an *additional* layer. opencode's own `permission` rules still apply
-on top of it, and CogniCode never widens them.
+### What the shell check is, and is not
+
+The shell check is a **deny-list heuristic, not a sandbox**: it splits a command
+into segments and rejects anything that redirects, hides behind a wrapper such as
+`env` or `command`, or uses an interpreter. That catches ordinary mutations and
+the common escapes, not every one. Two things cover the rest:
+
+- opencode's own `permission` rules still apply on top of CogniCode, and
+  CogniCode never widens them.
+- `cognicode_state` reports `guard.unclassified_tools`, so a tool the guard does
+  not recognise is visible rather than silently unguarded.
+
+If you find a command that slips through while a decision is unresolved, that is
+a bug — report it. The guard is an *additional* layer, not a replacement for
+thinking about what the model is doing.
 
 ---
 
@@ -372,15 +420,17 @@ challenges.
 | `/cognicode-learn` | activates or resumes learning mode for this project |
 | `/cognicode-reset` | previews, backs up, and restarts onboarding |
 
-Neither can be triggered by the model on its own — they're slash-invoked or
-explicitly requested only, so a normal "build me X" request never accidentally
-turns into a lesson.
+Both are skills, so they are not model-invocable as decisions: they only carry
+instructions, and the plugin's tools are what change anything. On opencode 1.18.x
+the model may still *load* a skill on its own unless you apply the
+[slash-only permission](#keep-the-skills-slash-only-recommended); with it applied,
+a normal "build me X" request never accidentally turns into a lesson.
 
 **Tools** the model uses (visible in the TUI with `CogniCode:` titles):
 
 | Tool | Purpose |
 | --- | --- |
-| `cognicode_state` | reports notes directory, engagement, mode, preferences, open decision, approved scope, and any problem |
+| `cognicode_state` | reports notes directory, engagement, mode, preferences, open decision, approved scope, guard coverage, and any problem |
 | `cognicode_engage` | records onboarding answers and preferences; creates `.cognicode/` |
 | `cognicode_mode` | pauses or resumes learning mode |
 | `cognicode_checkpoint` | records an open decision and returns the exact block to show you |
@@ -441,10 +491,14 @@ backups are historical data, not active context.
 | Symptom | Cause and fix |
 | --- | --- |
 | `/cognicode-learn` isn't in the TUI | opencode wasn't restarted, or the skills aren't in `.opencode/skills/`. Check `opencode debug skill`. |
+| It works when typed, but isn't in the `/` list | on 1.18.x skills aren't offered as top-level slash commands. Type `/cognicode-learn`, or open `/skills` and pick it. |
 | The model writes code with no checkpoint | learning mode isn't engaged in that project — run `/cognicode-learn` there. |
+| The `cognicode_*` tools don't exist | the plugin didn't load. Run `opencode debug agent build`; if the tools are missing, check that `.opencode/package.json` and `.opencode/node_modules/` exist (the SDK install is backgrounded and needs network) and that opencode was restarted. |
+| The model opened a skill by itself | 1.18.x ignores `metadata["opencode/autoinvoke"]`. Add the [slash-only permission block](#keep-the-skills-slash-only-recommended). |
 | Questions come as plain text instead of a picker | your config denies `permission.question`. The flow still works, just less cleanly. |
 | `Model not found` on startup | your global config names a model that no longer exists — check `~/.config/opencode/opencode.jsonc`. |
 | Guard blocks something legitimate | it means a checkpoint is unresolved. Answer, approve, or say "just implement this one". |
+| A mutating shell command slipped through | the shell check is a deny-list heuristic, not a sandbox. Report it as a bug. |
 | Old session ignores everything | CogniCode is installed but that project was started before the install, or bypass is active in that session. |
 | `state.json is not readable JSON` | the guard refuses to guess. Repair or delete the file; nothing else is touched. |
 | Notes aren't found from a subfolder | without a Git repository, only the starting directory is searched. Start opencode at the project root. |
@@ -461,13 +515,18 @@ marketplace, no hook JSON, and no build step:
 | Concern | opencode primitive |
 | --- | --- |
 | Installing | `.opencode/plugin/cognicode.ts`, auto-discovered at startup |
-| `/cognicode-learn` | a skill with `metadata["opencode/slash"]: "true"` |
-| Never firing on its own | `metadata["opencode/autoinvoke"]: "false"` |
+| `/cognicode-learn` | a skill, which opencode registers as a command with its contents as the prompt |
+| Keeping it out of the model's reach | `permission.skill` rules in `opencode.json` |
 | Restoring notes every session | `experimental.chat.system.transform` |
 | Surviving compaction | `experimental.session.compacting` |
 | Pickers for confirmations | the built-in `question` tool |
 | Owning the state | seven custom tools registered by the plugin |
 | Enforcing approval | `tool.execute.before`, which can refuse a call |
+
+Both skills also carry `metadata["opencode/slash"]` and
+`metadata["opencode/autoinvoke"]`, which opencode honours in newer releases. They
+are inert on 1.18.x, which is why the permission block above is the reliable
+version-independent answer.
 
 ### Design decisions worth knowing
 
@@ -508,10 +567,15 @@ npm install
 npm test
 ```
 
-Coverage includes scope enforcement and path escapes, shell classification,
-session-scoped bypass, pause/resume, legacy-notes adoption, symlink refusal,
-Git-boundary lookup, reset tokens, and the context injected into the system
-prompt and compaction.
+Coverage includes scope enforcement and path escapes, shell classification and
+the escapes that wrap it, session-scoped bypass, pause/resume, legacy-notes
+adoption, symlink refusal, Git-boundary lookup, reset tokens, re-engagement that
+must not drop state, guard coverage reporting, and the context injected into the
+system prompt and compaction.
+
+The tests exercise the plugin's own logic against throwaway projects. They do not
+run a model, so they cannot prove the conversational loop — that depends on the
+learner, the model, and the behavior guide doing their part.
 
 ---
 

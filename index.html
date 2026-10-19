@@ -692,10 +692,13 @@ ul.critique{margin:0;padding:0}
           <p>
             <code>/cognicode-learn</code> loads a behavior guide for the whole
             conversation: ask for your approach, teach, never quietly substitute
-            your judgment. It never fires on its own — an ordinary build request
-            is not a lesson.
+            your judgment. It carries no power of its own — only the plugin's
+            tools change anything.
           </p>
-          <p><code>opencode/slash: "true"</code> · <code>opencode/autoinvoke: "false"</code></p>
+          <p>
+            A skill the model cannot reach: <code>permission.skill</code> keeps an
+            ordinary build request from turning into a lesson.
+          </p>
         </article>
 
         <article class="anat reveal">
@@ -770,6 +773,7 @@ ul.critique{margin:0;padding:0}
             <li>redirects · sed -i · find -delete</li>
             <li>git commit / push / checkout</li>
             <li>gh pr create · node -e</li>
+            <li>env · command wrappers · awk</li>
           </ul>
         </article>
         <article class="cell cell--allow reveal">
@@ -798,6 +802,13 @@ ul.critique{margin:0;padding:0}
         Ask the learner, record the outcome with <span class="hot">cognicode_resolve</span>, then retry.
         File writes and mutating shell commands stay blocked; <span class="hot">do not work around the guard</span>.</p>
       </div>
+
+      <p class="figcap reveal">
+        The shell check is a deny-list heuristic, not a sandbox. opencode's own
+        permission rules still apply on top, and
+        <code>cognicode_state</code> reports any tool the guard cannot classify
+        rather than letting it pass unnoticed.
+      </p>
     </div>
   </section>
 

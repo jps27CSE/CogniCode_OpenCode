@@ -149,6 +149,37 @@ test("keeps read-only shell inspection open and mutating shell closed", async ()
   }
 })
 
+test("denies shell escapes that smuggle a write past the classifier", async () => {
+  const h = await harness()
+  await h.engage()
+  for (const command of [
+    `env node -e 'require("fs").rmSync("src")'`,
+    `env -i sh -c "rm -rf src"`,
+    "command rm -rf src",
+    `awk 'BEGIN{system("rm -rf src")}' /dev/null`,
+    "git log --output=out.txt",
+    "git log -o out.txt",
+    "sort -o out.txt src/app.ts",
+    "find . -fprintf out.txt",
+    "find . -fprint out.txt",
+    `sed 'w out.txt' src/app.ts`,
+    `sed 's/a/b/w out.txt' src/app.ts`,
+    "time rm -rf src",
+  ]) {
+    assert.equal(await h.denied("bash", { command }), true, `expected denied: ${command}`)
+  }
+  for (const command of [
+    "sort src/app.ts",
+    "sed -n '1,5p' src/app.ts",
+    "find . -name '*.ts'",
+    "git log --oneline -5",
+    "git diff --stat",
+    "printenv PATH",
+  ]) {
+    assert.equal(await h.denied("bash", { command }), false, `expected allowed: ${command}`)
+  }
+})
+
 test("renders build checkpoints verbatim with no approval options", async () => {
   const h = await harness()
   await h.engage()
@@ -303,6 +334,52 @@ test("records reasoning from a build checkpoint", async () => {
   assert.match(answered.guard, /no write access/)
   const wrong = await h.call("cognicode_resolve", { outcome: "answered", note: "x" })
   assert.match(wrong.error, /no open CogniCode decision/)
+})
+
+test("re-engaging never drops an open decision or an approved scope", async () => {
+  const h = await harness()
+  await h.engage()
+  await approveStep(h)
+  await h.call("cognicode_engage", { resume: true, situation: "new" })
+  const resumed = await h.call("cognicode_state")
+  assert.equal(resumed.engaged, true)
+  assert.deepEqual(resumed.approval.files, ["src/links.ts", "src/app.ts"])
+  assert.equal(await h.denied("write", { filePath: "src/links.ts" }), false)
+  assert.equal(await h.denied("write", { filePath: "src/sneaky.ts" }), true)
+
+  await h.call("cognicode_checkpoint", {
+    kind: "confirm-implementation",
+    title: "Next step",
+    proposal: "Do the next thing.",
+    scope: "Do the next thing",
+    files: ["src/app.ts"],
+  })
+  const reopened = await h.call("cognicode_engage", { resume: true })
+  assert.equal(reopened.pending_decision.title, "Next step")
+  assert.equal(await h.denied("edit", { filePath: "src/app.ts" }), true)
+})
+
+test("re-engaging leaves a paused profile paused", async () => {
+  const h = await harness()
+  await h.engage()
+  await h.call("cognicode_mode", { mode: "paused", reason: "focus day" })
+  const state = await h.call("cognicode_engage", { resume: true })
+  assert.equal(state.mode, "paused")
+  assert.equal(await h.denied("write", { filePath: "src/anything.ts" }), false)
+})
+
+test("reports which tool IDs the guard can and cannot classify", async () => {
+  const h = await harness()
+  const before = await h.call("cognicode_state")
+  assert.deepEqual(before.guard.unclassified_tools, [])
+  assert.ok(before.guard.write_tools.includes("edit"))
+
+  for (const toolID of ["bash", "read", "edit", "write"]) await h.hooks["tool.definition"]({ toolID }, {})
+  await h.hooks["tool.definition"]({ toolID: "mcp:linear:create_issue" }, {})
+  const after = await h.call("cognicode_state")
+  assert.deepEqual(after.guard.observed_tools, ["bash", "edit", "mcp:linear:create_issue", "read", "write"])
+  assert.deepEqual(after.guard.unclassified_tools, ["mcp:linear:create_issue"])
+  assert.match(after.guard.note, /does not recognise/)
 })
 
 test("bypass lifts the guard for that session only", async () => {
