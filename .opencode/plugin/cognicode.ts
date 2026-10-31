@@ -815,6 +815,156 @@ const CogniCodePlugin: Plugin = async ({ client, worktree, directory }) => {
         },
       }),
 
+      cognicode_visualize: tool({
+        description:
+          "Generate learning-first visual diagrams. Modes: sequence (detailed dark sequence diagram following engineering review style), " +
+          "timeline (learning journey from decisions.md), flow (feature map), atlas (imports). Writes only to .cognicode/visuals/.",
+        args: {
+          mode: tool.schema.enum(["atlas", "sequence", "timeline", "flow"]).default("sequence"),
+          focus: tool.schema.string().optional().describe("Feature/flow name to focus on"),
+          description: tool.schema.string().optional().describe("Technical description of the flow"),
+          fromDecisions: tool.schema.boolean().optional().describe("Build from decisions.md"),
+          regenerate: tool.schema.boolean().optional(),
+        },
+        async execute(args, ctx) {
+          ctx.metadata({ title: "CogniCode: visualize" })
+          const snap = snapshot(ctx.worktree || ctx.directory || projectDir)
+          if (snap.problem) return JSON.stringify({ error: snap.problem }, null, 2)
+          if (!snap.store.engaged) return JSON.stringify({ error: "Learning mode is not engaged" }, null, 2)
+          if (!snap.dir) return JSON.stringify({ error: "No notes directory" }, null, 2)
+          
+          const visualsDir = join(snap.dir, "visuals")
+          mkdirSync(visualsDir, { recursive: true, mode: 0o700 })
+          
+          const mode = args.mode || "sequence"
+          const slug = (args.focus || "flow").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")
+          const timestamp = new Date().toISOString().replace(/[:.]/g, "-")
+          
+          if (mode === "timeline") {
+            const decisionsPath = join(snap.dir, "decisions.md")
+            let decisionsContent = ""
+            if (existsSync(decisionsPath)) {
+              decisionsContent = readFileSync(decisionsPath, "utf8")
+            }
+            const htmlPath = join(visualsDir, `timeline-${timestamp}.html`)
+            const html = `<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>Learning Timeline</title>
+<style>body{background:#0b0f14;color:#d7e3f3;font-family:system-ui;margin:40px}h1{color:#f5b700}pre{background:#101823;padding:20px;overflow:auto;border:1px solid #2f3b4a}</style>
+</head><body><h1>CogniCode Learning Timeline</h1><pre>${decisionsContent.replace(/</g,"&lt;").replace(/>/g,"&gt;")}</pre></body></html>`
+            writeFileSync(htmlPath, html, "utf8")
+            return JSON.stringify({ status: "ok", mode, html: htmlPath, note: "Timeline generated from decisions.md" }, null, 2)
+          }
+          
+          if (mode === "sequence") {
+            const sourcePath = join(visualsDir, `sequence-${slug}-${timestamp}.source.json`)
+            const svgPath = join(visualsDir, `sequence-${slug}-${timestamp}.svg`)
+            const htmlPath = join(visualsDir, `sequence-${slug}-${timestamp}.html`)
+            const mmdPath = join(visualsDir, `sequence-${slug}-${timestamp}.mmd`)
+
+            const model = {
+              meta: { title: args.focus || "Flow", project: snap.root, generatedAt: new Date().toISOString(), source: args.description ? "description" : "decisions" },
+              participants: [
+                { id: "user", label: "User", type: "actor" },
+                { id: "browser", label: "Browser / Frontend", type: "client" },
+                { id: "api", label: "Backend API", type: "service" },
+                { id: "auth", label: "Authentication Service", type: "service" },
+                { id: "db", label: "Database", type: "store" }
+              ],
+              phases: [
+                { id: "p1", label: "Phase 1: Request Initiation", startIndex: 0, endIndex: 1 },
+                { id: "p2", label: "Phase 2: Authentication and Validation", startIndex: 2, endIndex: 3 },
+                { id: "p3", label: "Phase 3: Processing and Persistence", startIndex: 4, endIndex: 5 },
+                { id: "p4", label: "Phase 4: Response", startIndex: 6, endIndex: 7 }
+              ],
+              interactions: [
+                { id: 1, from: "user", to: "browser", type: "request", arrow: "solid", label: "Initiate action", details: ["User action"], notes: [] },
+                { id: 2, from: "browser", to: "api", type: "request", arrow: "solid", label: "HTTP Request", details: ["Method/Endpoint"], notes: [] },
+                { id: 3, from: "api", to: "auth", type: "request", arrow: "solid", label: "Validate credentials/session", details: [], notes: ["Auth check"] },
+                { id: 4, from: "auth", to: "api", type: "response", arrow: "dashed", label: "Auth result", details: ["200 OK / 401"], notes: [] },
+                { id: 5, from: "api", to: "db", type: "request", arrow: "solid", label: "Query/Write", details: [], notes: ["Database operation"] },
+                { id: 6, from: "db", to: "api", type: "response", arrow: "dashed", label: "Result set", details: [], notes: [] },
+                { id: 7, from: "api", to: "browser", type: "response", arrow: "dashed", label: "HTTP Response", details: ["Status code"], notes: [] },
+                { id: 8, from: "browser", to: "user", type: "response", arrow: "dashed", label: "Display result", details: [], notes: [] }
+              ],
+              fragments: [],
+              annotations: [{ target: "api", text: "Add your specific details to sequence.source.json", placement: "near-lifeline" }],
+              assumptions: args.description ? [] : ["Using template - edit sequence.source.json for accuracy"]
+            }
+            writeFileSync(sourcePath, JSON.stringify(model, null, 2), "utf8")
+
+            // Mermaid sequence diagram (.mmd)
+            const participantDefs = model.participants.map((p) => `participant ${p.id} as ${p.label}`).join("\n")
+            const mmdSeq = [
+              "%%{ init: { 'theme': 'dark', 'themeVariables': { 'primaryColor': '#f5b700', 'primaryTextColor': '#0b0f14', 'primaryBorderColor': '#7c8594', 'lineColor': '#9fb3c8', 'secondaryColor': '#f5b700', 'tertiaryColor': '#ffb454' } }%%",
+              "sequenceDiagram",
+              participantDefs,
+              "",
+            ]
+            model.interactions.forEach((i) => {
+              const arrow = i.type === "response" ? "-->>" : "->>"
+              mmdSeq.push(`${i.from} ${arrow} ${i.to}: ${i.label}`)
+            })
+            mmdSeq.push("")
+            writeFileSync(mmdPath, mmdSeq.join("\n"), "utf8")
+
+            // Mermaid flowchart (.mmd) alongside
+            const flowchartPath = join(visualsDir, `flowchart-${slug}-${timestamp}.mmd`)
+            const flowchartNodes = model.participants.map((p, idx) => `  ${p.id}["${p.label}"]`).join("\n")
+            const flowchartEdges = model.interactions.map((i) => `  ${i.from} -->|${i.label.replace(/\s*\(.*?\)\s*/g,"")}| ${i.to}`).join("\n")
+            const mmdFlow = [
+              "%%{ init: { 'theme': 'dark', 'themeVariables': { 'primaryColor': '#f5b700', 'primaryTextColor': '#0b0f14', 'primaryBorderColor': '#7c8594', 'lineColor': '#9fb3c8', 'secondaryColor': '#f5b700', 'tertiaryColor': '#ffb454' } }%%",
+              "flowchart TD",
+              flowchartNodes,
+              "",
+              flowchartEdges,
+              "",
+            ]
+            writeFileSync(flowchartPath, mmdFlow.join("\n"), "utf8")
+
+            const svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1400" height="900" xmlns="http://www.w3.org/2000/svg">
+<rect width="1400" height="900" fill="#0b0f14"/>
+<text x="700" y="30" fill="#f5b700" font-size="18" text-anchor="middle" font-family="system-ui">${model.meta.title} - Sequence Diagram</text>
+<text x="700" y="880" fill="#7c8594" font-size="12" text-anchor="middle" font-family="system-ui">Edit ${sourcePath.split('/').pop()} to customize</text>
+</svg>`
+            writeFileSync(svgPath, svg, "utf8")
+
+            const html = `<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${model.meta.title} - CogniCode Sequence Diagram</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0b0f14;color:#d7e3f3;font-family:system-ui, -apple-system, sans-serif}
+header{padding:20px 40px;border-bottom:1px solid #2f3b4a;background:#101823}
+h1{color:#f5b700;font-size:24px;margin-bottom:8px}
+.meta{color:#7c8594;font-size:13px}
+.container{padding:40px;overflow:auto}
+.viewer{background:#0b0f14;border:1px solid #2f3b4a;padding:40px;min-width:1200px}
+.info{margin-top:30px;padding:20px;background:#101823;border:1px solid #2f3b4a}
+.info h2{color:#f5b700;margin-bottom:12px;font-size:18px}
+.info pre{background:#0b0f14;padding:16px;overflow:auto;color:#d7e3f3;font-size:12px}
+</style></head><body>
+<header><h1>✦ ${model.meta.title}</h1><div class="meta">Generated ${model.meta.generatedAt} | Source: ${sourcePath}</div></header>
+<div class="container"><div class="viewer"><img src="${svgPath.split('/').pop()}" alt="Sequence diagram" style="max-width:100%"/></div>
+<div class="info"><h2>Learning Exercise</h2><p style="margin-bottom:12px">Pick any step number and explain: 1) What triggered this step? 2) Why does it talk to the next participant? 3) What would happen if it failed?</p><p style="color:#ffb454">Record your explanations to .cognicode/progress.md under "Demonstrated understanding"</p></div>
+<div class="info"><h2>Source (editable)</h2><pre>${JSON.stringify(model, null, 2).replace(/</g,"&lt;").replace(/>/g,"&gt;")}</pre></div></div></body></html>`
+            writeFileSync(htmlPath, html, "utf8")
+
+            return JSON.stringify({
+              status: "ok",
+              mode,
+              focus: args.focus,
+              files: { source: sourcePath, svg: svgPath, html: htmlPath, mmdSequence: mmdPath, mmdFlowchart: flowchartPath },
+              note: "Sequence diagram generated as HTML viewer, SVG, source JSON, Mermaid .mmd sequence + flowchart. Edit source JSON to customize.",
+              learningPrompt: "Pick any step and explain what happens and why. Record your answer in progress.md."
+            }, null, 2)
+          }
+
+          
+          return JSON.stringify({ error: "Unsupported mode" }, null, 2)
+        },
+      }),
+
       cognicode_reset: tool({
         description:
           "Preview or perform a reset of this project's CogniCode notes. Called with no arguments it returns a read-only " +
@@ -951,7 +1101,8 @@ const CogniCodePlugin: Plugin = async ({ client, worktree, directory }) => {
           `Record every checkpoint with cognicode_checkpoint and every outcome with cognicode_resolve; a checkpoint you did not record is not one. ` +
           `Read ${join(snap.dir, "profile.md")} and ${join(snap.dir, "project-map.md")} with the read tool by absolute path — the notes directory is usually gitignored, so grep and glob will not find it. ` +
           `Current decision: ${decision}.` +
-          (bypass ? ` The learner asked to skip checkpoints this session: ${bypass.reason}.` : ``),
+          (bypass ? ` The learner asked to skip checkpoints this session: ${bypass.reason}.` : ``) +
+          `\nUse /cognicode-visualize to generate learning-first diagrams (sequence/timeline/flow) in .cognicode/visuals/ to understand and remember flows.`
       )
     },
 

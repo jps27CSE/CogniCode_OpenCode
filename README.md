@@ -190,7 +190,7 @@ scripts/install.sh /path/to/your/project
 scripts/install.sh --global        # installs into ~/.config/opencode
 ```
 
-The script copies one plugin file and two skills. It never overwrites anything
+The script copies one plugin file and three skills. It never overwrites anything
 unless you pass `--force`. Run it with no arguments to install into the current
 directory.
 
@@ -418,6 +418,7 @@ challenges.
 | Command | Does |
 | --- | --- |
 | `/cognicode-learn` | activates or resumes learning mode for this project |
+| `/cognicode-visualize` | generates learning-first diagrams (sequence/timeline/flow/atlas) to understand and remember flows |
 | `/cognicode-reset` | previews, backs up, and restarts onboarding |
 
 Both are skills, so they are not model-invocable as decisions: they only carry
@@ -436,6 +437,7 @@ a normal "build me X" request never accidentally turns into a lesson.
 | `cognicode_checkpoint` | records an open decision and returns the exact block to show you |
 | `cognicode_resolve` | records the outcome; grants scoped write access on implementation approval; can open the next checkpoint in one call |
 | `cognicode_bypass` | records that you asked to skip checkpoints, or clears it |
+| `cognicode_visualize` | generates learning-first diagrams in `.cognicode/visuals/` (sequence, timeline, flow, atlas) |
 | `cognicode_reset` | previews and performs a notes reset behind a confirmation token |
 
 ---

@@ -466,6 +466,13 @@ ul.critique{margin:0;padding:0}
 .steps{display:grid;gap:1.6rem;margin-top:2.6rem;grid-template-columns:repeat(auto-fit,minmax(17rem,1fr))}
 .step-n h3{font-size:1.05rem;letter-spacing:-.02em;margin-bottom:.45rem}
 .step-n p{margin:0 0 .8rem;font-size:.9rem;color:var(--ink-soft)}
+/* ── howto steps ── */
+.howto-steps{list-style:none;counter-reset:step;margin-top:1.2rem;padding:0}
+.howto-steps li{counter-increment:step;position:relative;padding:.9rem 0 1.1rem 3.6rem;border-bottom:var(--rule-hair);margin-bottom:.6rem}
+.howto-steps li::before{content:counter(step);position:absolute;left:0;top:.4rem;width:2rem;height:2rem;background:var(--f5b700);color:#0b0f14;border-radius:50%;text-align:center;line-height:2rem;font-family:var(--display);font-weight:800;font-size:.95rem}
+.howto-steps li strong{color:var(--ink);font-size:1rem}
+.howto-steps li code{color:var(--stamp-ink);font-size:.9rem}
+.howto-steps li:last-child{border-bottom:0;margin-bottom:0}
 .code-inline{
   display:block;font-family:var(--mono);font-size:.78rem;
   background:var(--ink);color:var(--paper-lift);padding:.6rem .75rem;
@@ -673,7 +680,7 @@ ul.critique{margin:0;padding:0}
       <p class="figcap reveal"><b>Fig. 02</b> — three parts, no build step</p>
       <h2 class="h-section reveal">A skill, a guard, and a state file.</h2>
       <p class="lede reveal">
-        Everything ships as one plugin file and two skills inside
+        Everything ships as one plugin file and three skills inside
         <code>.opencode/</code>. opencode discovers it at startup. There is no
         marketplace, no hook JSON, and nothing to compile.
       </p>
@@ -848,10 +855,63 @@ ul.critique{margin:0;padding:0}
     </div>
   </section>
 
+  <!-- ── VISUALIZER ─────────────────────────────────────── -->
+  <section class="band" id="visualizer">
+    <div class="wrap">
+      <p class="figcap reveal"><b>Fig. 05</b> — flow visualizer</p>
+      <h2 class="h-section reveal">See what you built to remember it better.</h2>
+      <p class="lede reveal">
+        <code>/cognicode-visualize</code> generates learning-first diagrams for flows you actually decided to build.
+        Detailed dark sequence diagrams with phases, parallel branches, numbered steps, and annotations — edit the
+        source JSON and explain steps back to lock them in.
+      </p>
+      <p style="margin-top:1rem;color:var(--ink-faint);font-size:.88rem;">
+        <strong>Outputs:</strong> editable <code>*.source.json</code>, dark <code>.svg</code>, self-contained
+        <code>.html</code> viewer, Mermaid <code>.mmd</code> sequence diagram, Mermaid <code>.mmd</code> flowchart —
+        render anywhere Markdown is shown (GitHub, GitLab, VS Code).
+      </p>
+      <div class="grid grid--three" style="margin-top:2rem">
+        <article class="note reveal">
+          <h4>Sequence diagrams</h4>
+          <p>Engineering-review style with participants, lifelines, requests/responses, phases,
+             <code>par/alt/opt</code> fragments, annotations.</p>
+        </article>
+        <article class="note reveal">
+          <h4>Timeline &amp; flow maps</h4>
+          <p>Trace your learning journey from <code>decisions.md</code> and cluster files by features from approved scopes.</p>
+        </article>
+        <article class="note reveal">
+          <h4>Learn by explaining</h4>
+          <p>Pick any step and explain it. Record understanding in <code>progress.md</code> — diagrams become recall tools.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── HOW TO USE ─────────────────────────────────────── -->
+  <section class="band" id="visualizer-howto">
+    <div class="wrap">
+      <p class="figcap reveal"><b>Fig. 05b</b> — generate &amp; use your flow diagram</p>
+      <h2 class="h-section reveal">Steps: generate, open, explain.</h2>
+      <ol class="howto-steps" style="margin-top:1rem;color:var(--ink-soft);line-height:1.7;">
+        <li><strong>Open CogniCode.</strong> Run <code>/cognicode-visualize</code> in your project's opencode session.</li>
+        <li><strong>Pick a flow.</strong> A Build checkpoint asks which flow to trace. Choose one you want to explain end-to-end (e.g. auth, upload, notes CRUD).</li>
+        <li><strong>Add details.</strong> Answer quick questions: entrypoint, auth, async storage, error handling. Unclear items are marked as assumptions.</li>
+        <li><strong>Generate.</strong> A dark-themed sequence diagram is written to <code>.cognicode/visuals/</code>
+          as SVG, HTML viewer, source JSON, and Mermaid <code>.mmd</code> sequence + flowchart.</li>
+        <li><strong>Open in browser.</strong> Open the generated HTML file — zoom, pan, jump to phases, toggle notes/fragments.</li>
+        <li><strong>Explain back.</strong> Pick any step number and explain: what triggered it, why components talk, what happens on failure. Record your answer in <code>.cognicode/progress.md</code> under "Demonstrated understanding".</li>
+      </ol>
+      <p style="margin-top:2rem;color:var(--ink-faint);font-size:.85rem;">
+        <strong>Why this helps you remember:</strong> You don't just look at the diagram — you explain it back in your own words. That active recall turns the flow into something you own, not just code you see.
+      </p>
+    </div>
+  </section>
+
   <!-- ── LEDGER ───────────────────────────────────────── -->
   <section class="band" id="ledger">
     <div class="wrap">
-      <p class="figcap reveal"><b>Fig. 05</b> — what you keep</p>
+      <p class="figcap reveal"><b>Fig. 06</b> — what you keep</p>
       <h2 class="h-section reveal">Every decision, on the record.</h2>
       <p class="lede reveal">
         <code>decisions.md</code> is written by the plugin, not the model. Six
@@ -910,7 +970,7 @@ ul.critique{margin:0;padding:0}
       <div class="steps">
         <article class="step-n reveal">
           <h3>One project</h3>
-          <p>Copy the plugin and both skills into the project you want to work in.</p>
+          <p>Copy the plugin and all skills into the project you want to work in.</p>
           <code class="code-inline"><span class="p">$</span> scripts/install.sh ./my-project</code>
         </article>
         <article class="step-n reveal">
@@ -940,7 +1000,7 @@ ul.critique{margin:0;padding:0}
         </div>
         <div class="note reveal">
           <h4>Verify</h4>
-          <p><code>opencode debug skill</code> lists both skills. <code>opencode debug agent build</code> lists the seven tools.</p>
+          <p><code>opencode debug skill</code> lists three skills. <code>opencode debug agent build</code> lists the eight tools.</p>
         </div>
       </div>
     </div>

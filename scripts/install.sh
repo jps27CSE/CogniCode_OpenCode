@@ -47,7 +47,7 @@ echo "CogniCode -> $target"
 
 install_file "$root/.opencode/plugin/cognicode.ts" "$target/.opencode/plugin/cognicode.ts"
 
-for skill in cognicode-learn cognicode-reset; do
+for skill in cognicode-learn cognicode-reset cognicode-visualize; do
   for file in "$root/.opencode/skills/$skill"/*; do
     install_file "$file" "$target/.opencode/skills/$skill/$(basename "$file")"
   done
